@@ -41,7 +41,7 @@ class HVPOperatorFullSet(Operator):
             vec_seq.append(vec[loc:loc + param.numel()].reshape_as(param))
             loc += param.numel()
 
-        self.model.zero_grad()
+        #self.model.zero_grad()
         #hvp = torch.zeros(self.size, device=self.device, dtype=self.dtype)
         #for i, (inputs, targets) in enumerate(self.dataloader):
         #    inputs, targets = inputs.to(device=self.device, dtype=self.dtype), targets.to(self.device)

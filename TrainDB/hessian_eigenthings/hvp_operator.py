@@ -61,13 +61,14 @@ class HVPOperator(Operator):
         #print(self.grad_vec.shape)
         #w = [p for p in self.model.parameters() if len(p.size()) > 1]
         w = [p for p in self.model.parameters()]
-        print(torch.norm(self.grad_vec))
+        #print(torch.norm(self.grad_vec))
         grad_grad = torch.autograd.grad(
-            self.grad_vec, w, grad_outputs=vec, only_inputs=True
+            self.grad_vec, w, grad_outputs=vec, only_inputs=True,retain_graph=True
             #, allow_unused=True
         )
         # concatenate the results over the different components of the network
         hessian_vec_prod = torch.cat([g.contiguous().view(-1) for g in grad_grad])
+        print(hessian_vec_prod,vec)
         return hessian_vec_prod
 
     '''def _apply_full(self, vec):

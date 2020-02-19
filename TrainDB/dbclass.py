@@ -13,12 +13,14 @@ class TrainDB:
     '''
 
     # Initializer / Instance Attributes
-    def __init__(self, net, norm=2, storeweight=True, storenorm=True, storediffnorm=True, batchfreq=None, storegrad=True, storetrainloss=True, epochfreq=1 ):
+    def __init__(self, net,dataloader, criterion, norm=2, storeweight=True, storenorm=True, storediffnorm=True, batchfreq=None, storegrad=True, storetrainloss=True, epochfreq=1 ):
 
         #Setting Parameters
         self.network = copy.deepcopy(net)
         #self.network.load_state_dict(copy.deepcopy(net.state_dict()))
         self.currnetwork = copy.deepcopy(net)
+        self.criterion = criterion
+        self.dataloader = dataloader
         self.storegrad = storegrad
         self.storeweight = storeweight
         self.storenorm = storenorm
@@ -206,10 +208,33 @@ class TrainDB:
         '''Returns top-k eigenvalues of the Hessian of the loss surface at iteration corresponding to the epoch and iteration'''
 
 
-        #network =  #build network using current weights at iteration i
+        network = copy.deepcopy(self.currnetwork)
+        '''build network using current weights at iteration i
+        for param in network.parameters():
+            network[param] = torch.from_numpy(self.ithweight(param,epoch,batch_id))
+            network[param].requires_grad = True
+        '''
         #eigenvals, eigenvecs = compute_hessian_eigenthings(self.network, self.lgrad[self.genind(epoch,batch_id)],num_eigenthings=k,power_iter_steps=100)
-        hess = HessianOperator(self.currnetwork, self.lgrad[self.genind(epoch,batch_id)] )
-        eigenvalue_analysis(hess,k=k,max_iter=20)
+        #for i, (inputs, targets) in enumerate(self.dataloader):
+        #    inputs, targets = inputs.to(device=self.device, dtype=self.dtype), targets.to(self.device)
+        #    loss = self.criterion(network(inputs), targets)
+        #    grad_seq = torch.autograd.grad(loss, network.parameters(),only_inputs=True, create_graph=True, retain_graph=True)
+
+        network.zero_grad()
+        for batch_idx, (data, target) in enumerate(self.dataloader):
+            output = network(data)
+            loss = self.criterion(output, target)/(len(self.dataloader)*1.0)
+            loss.backward(create_graph=True,retain_graph=True)
+        grads = []
+        for param in network.parameters():
+            grads.append(param.grad)
+
+        grad_vec = torch.cat([g.contiguous().view(-1) for g in grads])
+        compute_hessian_eigenthings(network,grad_vec)
+
+        #hess = HessianOperator(network, grads)
+        #self.lgrad[self.genind(epoch,batch_id)]
+        #eigenvalue_analysis(hess,k=k,max_iter=20)
         return
 
     def maxweight(self,layer=None):

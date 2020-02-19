@@ -72,6 +72,7 @@ class HVPOperator(Operator):
             else:
                 hessian_vec_prod = self._apply_batch(vec)
         hessian_vec_prod = hessian_vec_prod / n
+        print(hessian_vec_prod,vec)
         return hessian_vec_prod
 
     def zero_grad(self):

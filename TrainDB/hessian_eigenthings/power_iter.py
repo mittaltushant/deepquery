@@ -6,7 +6,7 @@ import numpy as np
 import torch
 
 from hessian_eigenthings.utils import log, progress_bar
-
+from time import time
 
 class Operator:
     """
@@ -58,6 +58,7 @@ def deflated_power_iteration(
     current_op = operator
     prev_vec = None
 
+
     def _deflate(x, val, vec):
         return val * vec.dot(x) * vec
 
@@ -107,7 +108,8 @@ def power_iteration(
     """
     vector_size = operator.size  # input dimension of operator
     if init_vec is None:
-        vec = torch.rand(vector_size)
+        #vec = torch.rand(vector_size)
+        vec = torch.ones(vector_size)
     else:
         vec = init_vec
 
@@ -118,7 +120,9 @@ def power_iteration(
     prev_vec = torch.randn_like(vec)
     for i in range(steps):
         prev_vec = vec / (torch.norm(vec) + 1e-6)
+        t = time()
         new_vec = operator.apply(vec) - momentum * prev_vec
+        print("Step %d - Time taken = %d seconds"  %(i, time()-t) )
         # need to handle case where we end up in the nullspace of the operator.
         # in this case, we are done.
         if torch.sum(new_vec).item() == 0.0:
