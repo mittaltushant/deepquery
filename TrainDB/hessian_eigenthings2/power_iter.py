@@ -107,8 +107,8 @@ def power_iteration(
     """
     vector_size = operator.size  # input dimension of operator
     if init_vec is None:
-        #vec = torch.rand(vector_size)
-        vec = torch.ones(vector_size)
+        vec = torch.rand(vector_size)
+        #vec = torch.ones(vector_size)
     else:
         vec = init_vec
 

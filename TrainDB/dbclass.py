@@ -55,7 +55,7 @@ class TrainDB:
     '''
     def createrowfromweights(self,weights,layers):
         if self.storeepoch:
-             df = pd.DataFrame([weights],  index=self.currentepoch, columns=layers)
+             df = pd.DataFrame([weights],  index=[self.currentepoch], columns=layers)
         else:
             ind = [(self.currentepoch,self.currentbatch)]
             df = pd.DataFrame([weights],  index=pd.MultiIndex.from_tuples(ind), columns=layers)
@@ -121,8 +121,9 @@ class TrainDB:
     --------------------------------------------------------------------------------------
     '''
 
-    def step(self,epoch,batch_id,prev_net,net,grad,loss):
+    def step(self,epoch,batch_id,prev_net,net,loss):
         self.numiter +=1
+        self.currnetwork = copy.deepcopy(net)
         if self.storeepoch:
             if epoch == self.currentepoch:
                 return
@@ -137,6 +138,9 @@ class TrainDB:
         if self.storediffnorm:
             self.tdiffnorm = self.tdiffnorm.append(self.createrowdiffnorm(prev_net,net.state_dict(),self.norm))
         if self.storegrad:
+            grad = []
+            for param in net.parameters():
+                grad.append(param.grad.view(-1))
             if self.storeepoch:
                 self.lgrad[epoch] = [g/(self.numiter*1.0) for g in grad] #grad/(self.numiter*1.0)
             else:
@@ -146,7 +150,6 @@ class TrainDB:
                 self.trainloss[epoch] = loss
             else:
                 self.trainloss[(epoch,batch_id)] = loss
-        self.currnetwork = copy.deepcopy(net)
             #if self.lgrad is None:
             #    self.lgrad = self.createrowgrad(grad)
             #else:
@@ -154,7 +157,7 @@ class TrainDB:
 
     '''
     -------------------------------------------------------------------------------------
-                            A set of data query functions
+                            A set of helper functions
     --------------------------------------------------------------------------------------
     '''
 
@@ -172,25 +175,54 @@ class TrainDB:
     def query(self,df,layer, epoch=None, batch_id=None):
         ''' Returns element at a given epoch number and/or batch_id
         '''
-        #if iteration is not None:
-        #    return df[layer][iteration]
-        return df.loc[self.genind(epoch,batch_id),layer]
+        ind = self.genind(epoch,batch_id)
+        if isinstance(ind,tuple):
+            x = df.loc[ind,layer].values[0]
+        else:
+            x = df.loc[ind,layer]
+        return x
 
+    def reconstructnet(self,epoch,batch_id):
+        '''build network using current weights at iteration i
+        '''
+        network = copy.deepcopy(self.currnetwork)
+        if epoch is None:
+            network.zero_grad()
+            return network
+        d= {}
+        for param in list((network.state_dict()).keys()):
+            x = self.ithweight(param,epoch,batch_id)
+            y = torch.from_numpy(x)
+            y.requires_grad = True
+            d[param] = y
+
+        network.load_state_dict(d)
+        network.zero_grad()
+        return network
+
+
+    '''
+    -------------------------------------------------------------------------------------
+                            A set of simple data query functions
+    --------------------------------------------------------------------------------------
+    '''
     def ithweight(self,layer, epoch=None, batch_id=None):
         ''' Returns weight of a specific layer at a specific epoch/batch_id
         '''
-        #return self.query(self.tweight,layer,epoch,batch_id)
-        return self.tweight.loc[self.genind(epoch,batch_id),layer]
+        return self.query(self.tweight,layer,epoch,batch_id)
+        #return self.tweight.loc[self.genind(epoch,batch_id),layer].values[0]
 
     def ithnorm(self,layer, epoch=None, batch_id=None):
         ''' Returns norm of a specific layer at a specific epoch/batch_id
         '''
-        return self.tnorm.loc[self.genind(epoch,batch_id),layer]
+        return self.query(self.tnorm,layer,epoch,batch_id)
+        #return self.tnorm.loc[self.genind(epoch,batch_id),layer].values[0]
 
     def ithdiffnorm(self,layer, epoch=None, batch_id=None):
         ''' Returns difference of a specific layer at a specific epoch/batch_id # Needs some explaination
         '''
-        return self.tnorm.loc[self.genind(epoch,batch_id),layer]
+        return self.query(self.tdiffnorm,layer,epoch,batch_id)
+        #return self.tnorm.loc[self.genind(epoch,batch_id),layer].values[0]
 
     def ithgrad(self, epoch=None, batch_id=None):
         ''' Returns the (concatenated) gradient at a specific epoch/batch_id
@@ -201,27 +233,36 @@ class TrainDB:
     def ithtrain_accuracy(self,epoch,batch_id):
         return self.trainloss[self.genind(epoch,batch_id)]
 
+    def maxweight(self,layer=None):
+        '''Returns row of the table in which the iteration in which norm of the weight was maximum'''
+        return
+
+    def maxweightupdate(self,layer):
+        return
+
     #def ithtest_accuracy(self,iteration):
     #    return Should we have it? Too expensive
 
-    def ithhess_eigenval(self,epoch,batch_id,k=1):
-        '''Returns top-k eigenvalues of the Hessian of the loss surface at iteration corresponding to the epoch and iteration'''
+    '''
+    -------------------------------------------------------------------------------------
+                            A set of loss landscape related functions
+    --------------------------------------------------------------------------------------
+    '''
 
-
-        network = copy.deepcopy(self.currnetwork)
-        '''build network using current weights at iteration i
-        for param in network.parameters():
-            network[param] = torch.from_numpy(self.ithweight(param,epoch,batch_id))
-            network[param].requires_grad = True
+    def ithhess_eigenval(self,epoch=None,batch_id=None,k=1):
+        '''Returns top-k eigenvalues of the Hessian of the loss surface at iteration corresponding to the epoch and iteration
+            If epoch number not provided, uses the current model
         '''
+        #'''
         #eigenvals, eigenvecs = compute_hessian_eigenthings(self.network, self.lgrad[self.genind(epoch,batch_id)],num_eigenthings=k,power_iter_steps=100)
         #for i, (inputs, targets) in enumerate(self.dataloader):
         #    inputs, targets = inputs.to(device=self.device, dtype=self.dtype), targets.to(self.device)
         #    loss = self.criterion(network(inputs), targets)
         #    grad_seq = torch.autograd.grad(loss, network.parameters(),only_inputs=True, create_graph=True, retain_graph=True)
 
-        network.zero_grad()
+        network = self.reconstructnet(epoch,batch_id)
         for batch_idx, (data, target) in enumerate(self.dataloader):
+            data = data.view(data.shape[0], -1)  #Remove this line eventually
             output = network(data)
             loss = self.criterion(output, target)/(len(self.dataloader)*1.0)
             loss.backward(create_graph=True,retain_graph=True)
@@ -230,25 +271,20 @@ class TrainDB:
             grads.append(param.grad)
 
         grad_vec = torch.cat([g.contiguous().view(-1) for g in grads])
-        compute_hessian_eigenthings(network,grad_vec)
+        compute_hessian_eigenthings(network,grad_vec,num_eigenthings=k)
 
         #hess = HessianOperator(network, grads)
         #self.lgrad[self.genind(epoch,batch_id)]
         #eigenvalue_analysis(hess,k=k,max_iter=20)
         return
 
-    def maxweight(self,layer=None):
-        '''Returns row of the table in which the iteration in which norm of the weight was maximum'''
-        return
 
-    def maxweightupdate(self,layer):
-        return
 
 
 
     '''
     -------------------------------------------------------------------------------------
-                            A set of visuzlization functions
+                            A set of visualization functions
                             Plot norm, diffnorm, statistics, loss_landscape ??
     --------------------------------------------------------------------------------------
     '''

@@ -68,7 +68,7 @@ class HVPOperator(Operator):
         )
         # concatenate the results over the different components of the network
         hessian_vec_prod = torch.cat([g.contiguous().view(-1) for g in grad_grad])
-        print(hessian_vec_prod,vec)
+        #print(hessian_vec_prod,vec)
         return hessian_vec_prod
 
     '''def _apply_full(self, vec):
