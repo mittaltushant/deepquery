@@ -13,7 +13,18 @@ class TrainDB:
     '''
 
     # Initializer / Instance Attributes
-    def __init__(self, net,dataloader, criterion, norm=2, storeweight=True, storenorm=True, storediffnorm=True, batchfreq=None, storegrad=True, storetrainloss=True, epochfreq=1 ):
+    def __init__(self, net,dataloader, criterion,\
+        dictf=None, dictg=None, norm=2,\
+         storeweight=True, storenorm=True, storediffnorm=True,\
+          storegrad=True, storetrainloss=True, batchfreq=None, epochfreq=1 ):
+        '''
+        dictf is a dictionary of \{ fn_name: function definiton \} such that f is a function of weights,
+        i.e we will store f(W) for each layer and each iteration
+
+        dictg is a dictionary of \{ fn_name: function definiton \} such that f is a function of weights,
+        i.e we will store f(W_i - W_{i-1}) for each layer and each iteration
+        '''
+
 
         #Setting Parameters
         self.network = copy.deepcopy(net)
@@ -35,6 +46,9 @@ class TrainDB:
         self.currentbatch = 0
         self.norm = norm
         self.numiter = 0
+        self.dictf = copy.deepcopy(dictf)
+        self.dictg = copy.deepcopy(dictg)
+
 
         #Initialzing tables and dictionaries
         if storeweight:
@@ -48,6 +62,11 @@ class TrainDB:
             self.lgrad = dict()
         if storetrainloss:
             self.trainloss = dict()
+        if self.dictf is not None:
+            self.tdictf = self.createrowf((self.network).state_dict(),self.dictf)
+        if self.dictg is not None:
+            self.tdictg = self.createrowf((self.network).state_dict(),self.dictg)
+
     '''
     -------------------------------------------------------------------------------------
                     A set of constructor functions - to build the tables/dicts
@@ -69,6 +88,33 @@ class TrainDB:
             weights.append(np.array(n[l]))
         return self.createrowfromweights(weights,layers)
 
+    def createrowf(self,n,dictf):
+        ''' Returns a row consisting of f(W) for each f in dictf of the weights of every layer in the network n '''
+        layers = list(n.keys())
+        functions = list(dictf.keys())
+        weights = []
+        col = []
+        for l in layers:
+            X = np.array(n[l])
+            for f in functions:
+                weights.append(dictf[f](X))
+                col.append(str(l)+ '-' +str(f))
+        return self.createrowfromweights(weights,col)
+
+    def createrowg(self,oldn,newn,dictg):
+        ''' Returns a row consisting of f(W) for each f in dictf of the weights of every layer in the network n '''
+        layers = list(newn.keys())
+        functions = list(dictg.keys())
+        weights = []
+        col = []
+        for l in layers:
+            X = np.array(newn[l])
+            Y = np.array(oldn[l])
+            for g in functions:
+                weights.append(dictg[g](X-Y))
+                col.append(str(l)+ '-' +str(g))
+        return self.createrowfromweights(weights,col)
+
     def createrownorm(self,n,norm):
         ''' Returns a row consisting of norm of the weights in the network n '''
         layers = list(n.keys())
@@ -76,16 +122,10 @@ class TrainDB:
         for l in layers:
             X = np.array(n[l])
             if np.ndim(X) >2:
-                #print('A')
-                #print(np.linalg.norm(X))
                 weights.append(np.linalg.norm(X))
             elif np.ndim(X) == 1 and isinstance(norm,str) :
-                #print('B')
-                #print(np.linalg.norm(X,2))
-                weights.append(np.linalg.norm(X, 2) )
+                weights.append(np.linalg.norm(X, 2))
             else:
-                #print('C')
-                #print(np.linalg.norm(X,norm))
                 weights.append(np.linalg.norm(X, norm))
         return self.createrowfromweights(weights,layers)
 
@@ -97,16 +137,10 @@ class TrainDB:
             X = np.array(newdict[l])
             Y = np.array(olddict[l])
             if np.ndim(X) > 2:
-                #print('D')
-                #print(np.linalg.norm(X-Y))
                 weights.append(np.linalg.norm(X-Y))
             elif np.ndim(X) == 1 and isinstance(norm,str) :
-                #print('E')
-                #print(np.linalg.norm(X-Y),2)
-                weights.append(np.linalg.norm(X-Y, 2) )
+                weights.append(np.linalg.norm(X-Y, 2))
             else:
-                #print('F')
-                #print(np.linalg.norm(X-Y),2)
                 weights.append(np.linalg.norm(X-Y, norm))
         return self.createrowfromweights(weights,layers)
 
@@ -137,6 +171,10 @@ class TrainDB:
             self.tnorm = self.tnorm.append(self.createrownorm(net.state_dict(),self.norm))
         if self.storediffnorm:
             self.tdiffnorm = self.tdiffnorm.append(self.createrowdiffnorm(prev_net,net.state_dict(),self.norm))
+        if self.dictf is not None:
+            self.tdictf = self.tdictf.append(self.createrowf(net.state_dict(),self.dictf))
+        if self.dictg is not None:
+            self.tdictg = self.tdictg.append(self.createrowg(prev_net,net.state_dict(),self.dictg))
         if self.storegrad:
             grad = []
             for param in net.parameters():
@@ -164,7 +202,7 @@ class TrainDB:
 
     def genind(self,epoch,batch_id):
         if epoch is None:
-            return "Error" # Must do roper error handling
+            return "Error" # TODO: Proper error handling   
         if batch_id is None:
             if self.storeepoch:
                 return epoch  #Not the best way to write this
@@ -223,6 +261,16 @@ class TrainDB:
         '''
         return self.query(self.tdiffnorm,layer,epoch,batch_id)
         #return self.tnorm.loc[self.genind(epoch,batch_id),layer].values[0]
+
+    def ithdictf(self,layer, f_name, epoch=None, batch_id=None):
+        ''' Returns difference of a specific layer at a specific epoch/batch_id # Needs some explaination
+        '''
+        return self.query(self.tdictf,str(layer)+'-'+str(f_name),epoch,batch_id)
+
+    def ithdictg(self,layer, g_name, epoch=None, batch_id=None):
+        ''' Returns difference of a specific layer at a specific epoch/batch_id # Needs some explaination
+        '''
+        return self.query(self.tdictg,str(layer)+'-'+str(g_name),epoch,batch_id)
 
     def ithgrad(self, epoch=None, batch_id=None):
         ''' Returns the (concatenated) gradient at a specific epoch/batch_id
