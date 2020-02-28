@@ -15,51 +15,65 @@ class HVPOperator(Operator):
     def __init__(
         self,
         model,
+        dataloader,
+        criterion,
         grad_vec,
+        weird=False,
+        use_gpu=False,
         full_dataset=True,
         max_samples=256,
+        opt = False
     ):
         size = int(sum(p.numel() for p in model.parameters()))
         #print(size)
         #size = int(sum(p.numel() for p in model.parameters() if len(p.size()) > 1 ))
         #print(size)
-        super(HVPOperator, self).__init__(size)
+        super(HVPOperator, self).__init__(size,opt)
         self.grad_vec = grad_vec
         self.model = model
-        #if use_gpu:
-        #    self.model = self.model.cuda()
-        #self.dataloader = dataloader
+        if use_gpu:
+            self.model = self.model.cuda()
+        self.dataloader = dataloader
         # Make a copy since we will go over it a bunch
-        #self.dataloader_iter = iter(dataloader)
-        #self.criterion = criterion
-        #self.use_gpu = use_gpu
+        self.dataloader_iter = iter(dataloader)
+        self.criterion = criterion
+        self.use_gpu = use_gpu
         self.full_dataset = full_dataset
         self.max_samples = max_samples
+        self.weird = weird
+        #self.opt = opt
 
     def apply(self, vec):
         """
         Returns H*vec where H is the hessian of the loss w.r.t.
         the vectorized model parameters
         """
-        return self._apply_batch(vec)
-        '''
-        if self.full_dataset:
-            return self._apply_full(vec)
+        if self.opt:
+            return self._apply_batch2(vec)
         else:
-            return self._apply_batch(vec)
-            '''
+
+            if self.full_dataset:
+                return self._apply_full(vec)
+            else:
+                return self._apply_batch(vec)
+
 
     def _apply_batch(self, vec):
         # compute original gradient, tracking computation graph
         self.zero_grad()
-        #gTypeError: rsub() received an invalid combination of arguments - got (Tensor, NoneType), but expected one of:
-        #rad_vec = self.prepare_grad()
+        grad_vec = self.prepare_grad()
         self.zero_grad()
         # take the second gradient
-        #print("I am here")
-        #print(vec.shape)
-        #print(self.grad_vec.shape)
-        #w = [p for p in self.model.parameters() if len(p.size()) > 1]
+        grad_grad = torch.autograd.grad(
+            grad_vec, self.model.parameters(), grad_outputs=vec, only_inputs=True
+        )
+        # concatenate the results over the different components of the network
+        hessian_vec_prod = torch.cat([g.contiguous().view(-1) for g in grad_grad])
+        return hessian_vec_prod
+
+    def _apply_batch2(self, vec):
+        # compute original gradient, tracking computation graph
+        self.zero_grad()
         w = [p for p in self.model.parameters()]
         #print(torch.norm(self.grad_vec))
         grad_grad = torch.autograd.grad(
@@ -71,7 +85,7 @@ class HVPOperator(Operator):
         #print(hessian_vec_prod,vec)
         return hessian_vec_prod
 
-    '''def _apply_full(self, vec):
+    def _apply_full(self, vec):
         n = len(self.dataloader)
         hessian_vec_prod = None
         for _ in range(n):
@@ -81,7 +95,42 @@ class HVPOperator(Operator):
                 hessian_vec_prod = self._apply_batch(vec)
         hessian_vec_prod = hessian_vec_prod / n
         return hessian_vec_prod
-        '''
+    def prepare_grad(self):
+        """
+        Compute gradient w.r.t loss over all parameters and vectorize
+        """
+        try:
+            all_inputs, all_targets = next(self.dataloader_iter)
+        except StopIteration:
+            self.dataloader_iter = iter(self.dataloader)
+            all_inputs, all_targets = next(self.dataloader_iter)
+
+        num_chunks = max(1, len(all_inputs) // self.max_samples)
+
+        grad_vec = None
+
+        input_chunks = all_inputs.chunk(num_chunks)
+        target_chunks = all_targets.chunk(num_chunks)
+        for input, target in zip(input_chunks, target_chunks):
+            if self.use_gpu:
+                input = input.cuda()
+                target = target.cuda()
+
+            if self.weird:
+                input = input.view(input.shape[0], -1)
+            output = self.model(input)
+            loss = self.criterion(output, target)
+            grad_dict = torch.autograd.grad(
+                loss, self.model.parameters(), create_graph=True
+            )
+            if grad_vec is not None:
+                grad_vec += torch.cat([g.contiguous().view(-1) for g in grad_dict])
+            else:
+                grad_vec = torch.cat([g.contiguous().view(-1) for g in grad_dict])
+        grad_vec /= num_chunks
+        self.grad_vec = grad_vec
+        return self.grad_vec
+
 
     def zero_grad(self):
         """
@@ -94,12 +143,16 @@ class HVPOperator(Operator):
 
 def compute_hessian_eigenthings(
     model,
+    dataloader,
+    loss,
     grad_vec,
+    weird = False,
     num_eigenthings=10,
     full_dataset=True,
     mode="power_iter",
     use_gpu=False,
     max_samples=512,
+    opt=False,
     **kwargs
 ):
     """
@@ -134,9 +187,14 @@ def compute_hessian_eigenthings(
     """
     hvp_operator = HVPOperator(
         model,
+        dataloader,
+        loss,
         grad_vec,
+        weird = weird,
+        use_gpu=use_gpu,
         full_dataset=full_dataset,
         max_samples=max_samples,
+        opt=opt
     )
     eigenvals, eigenvecs = None, None
     if mode == "power_iter":

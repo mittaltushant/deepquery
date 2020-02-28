@@ -3,7 +3,7 @@ import numpy as np
 import torch
 import copy
 from hessian_eigenthings import compute_hessian_eigenthings
-from hvp import *
+#from hvp import *
 
 class TrainDB:
     '''
@@ -16,7 +16,8 @@ class TrainDB:
     def __init__(self, net,dataloader, criterion,\
         dictf=None, dictg=None, norm=2,\
          storeweight=True, storenorm=True, storediffnorm=True,\
-          storegrad=True, storetrainloss=True, batchfreq=None, epochfreq=1 ):
+          storegrad=True, storetrainloss=True, batchfreq=None, epochfreq=1,
+          weird=False ):
         '''
         dictf is a dictionary of \{ fn_name: function definiton \} such that f is a function of weights,
         i.e we will store f(W) for each layer and each iteration
@@ -48,6 +49,7 @@ class TrainDB:
         self.numiter = 0
         self.dictf = copy.deepcopy(dictf)
         self.dictg = copy.deepcopy(dictg)
+        self.weird = weird
 
 
         #Initialzing tables and dictionaries
@@ -202,7 +204,7 @@ class TrainDB:
 
     def genind(self,epoch,batch_id):
         if epoch is None:
-            return "Error" # TODO: Proper error handling   
+            return "Error" # TODO: Proper error handling
         if batch_id is None:
             if self.storeepoch:
                 return epoch  #Not the best way to write this
@@ -297,7 +299,7 @@ class TrainDB:
     --------------------------------------------------------------------------------------
     '''
 
-    def ithhess_eigenval(self,epoch=None,batch_id=None,k=1):
+    def ithhess_eigenval(self,epoch=None,batch_id=None,k=1,opt=False):
         '''Returns top-k eigenvalues of the Hessian of the loss surface at iteration corresponding to the epoch and iteration
             If epoch number not provided, uses the current model
         '''
@@ -307,24 +309,32 @@ class TrainDB:
         #    inputs, targets = inputs.to(device=self.device, dtype=self.dtype), targets.to(self.device)
         #    loss = self.criterion(network(inputs), targets)
         #    grad_seq = torch.autograd.grad(loss, network.parameters(),only_inputs=True, create_graph=True, retain_graph=True)
-
-        network = self.reconstructnet(epoch,batch_id)
-        for batch_idx, (data, target) in enumerate(self.dataloader):
-            data = data.view(data.shape[0], -1)  #Remove this line eventually
-            output = network(data)
-            loss = self.criterion(output, target)/(len(self.dataloader)*1.0)
-            loss.backward(create_graph=True,retain_graph=True)
-        grads = []
-        for param in network.parameters():
-            grads.append(param.grad)
-
-        grad_vec = torch.cat([g.contiguous().view(-1) for g in grads])
-        compute_hessian_eigenthings(network,grad_vec,num_eigenthings=k)
-
         #hess = HessianOperator(network, grads)
         #self.lgrad[self.genind(epoch,batch_id)]
         #eigenvalue_analysis(hess,k=k,max_iter=20)
-        return
+
+        network = self.reconstructnet(epoch,batch_id)
+
+        if opt:
+            for batch_idx, (data, target) in enumerate(self.dataloader):
+                if self.weird:
+                    data = data.view(data.shape[0], -1)  #Remove this line eventually
+                output = network(data)
+                loss = self.criterion(output, target)/(len(self.dataloader)*1.0)
+                loss.backward(create_graph=True) #retain_graph=True is not needed!
+            grads = []
+            for param in network.parameters():
+                grads.append(param.grad)
+
+            grad_vec = torch.cat([g.contiguous().view(-1) for g in grads])
+            eigenvals, eigenvecs = compute_hessian_eigenthings(network,self.dataloader,self.criterion,grad_vec,weird=self.weird,num_eigenthings=k,opt=True)
+            return (eigenvals, eigenvecs)
+
+        else:
+            eigenvals, eigenvecs = compute_hessian_eigenthings(network,self.dataloader,self.criterion,None,weird=self.weird,num_eigenthings=k,opt=False)
+            return (eigenvals, eigenvecs)
+
+
 
 
 

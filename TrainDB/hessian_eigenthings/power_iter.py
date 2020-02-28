@@ -13,8 +13,9 @@ class Operator:
     maps x -> Lx for a linear operator L
     """
 
-    def __init__(self, size):
+    def __init__(self, size,opt):
         self.size = size
+        self.opt = opt
 
     def apply(self, vec):
         """
@@ -28,9 +29,10 @@ class LambdaOperator(Operator):
     Linear operator based on a provided lambda function
     """
 
-    def __init__(self, apply_fn, size):
-        super(LambdaOperator, self).__init__(size)
+    def __init__(self, apply_fn, size,opt):
+        super(LambdaOperator, self).__init__(size,opt)
         self.apply_fn = apply_fn
+        #self.opt = opt
 
     def apply(self, x):
         return self.apply_fn(x)
@@ -78,7 +80,7 @@ def deflated_power_iteration(
         def _new_op_fn(x, op=current_op, val=eigenval, vec=eigenvec):
             return op.apply(x) - _deflate(x, val, vec)
 
-        current_op = LambdaOperator(_new_op_fn, operator.size)
+        current_op = LambdaOperator(_new_op_fn, operator.size, operator.opt)
         prev_vec = eigenvec
         eigenvals.append(eigenval)
         eigenvec = eigenvec.cpu()
@@ -120,9 +122,9 @@ def power_iteration(
     prev_vec = torch.randn_like(vec)
     for i in range(steps):
         prev_vec = vec / (torch.norm(vec) + 1e-6)
-        t = time()
+        #t = time()
         new_vec = operator.apply(vec) - momentum * prev_vec
-        print("Step %d - Time taken = %d seconds"  %(i, time()-t) )
+        #print("Step %d - Time taken = %d seconds"  %(i, time()-t) )
         # need to handle case where we end up in the nullspace of the operator.
         # in this case, we are done.
         if torch.sum(new_vec).item() == 0.0:
